@@ -1,119 +1,139 @@
-import { WebSocket } from 'ws'
-import fs from 'fs'
 import { mockPayload } from './mockPayload.js'
-import { generatePrompts } from './promptsGenerator.js'
-import { Image } from 'canvas'
 import { videoToFrames, countFilesInFolder } from './videoToFrames.js'
+import { generateAIImage } from './stableDiffusion.js'
+import { imageToBase64, getWidthAndHeightOfBase64, parseCSV } from './utils.js'
+import minimist from 'minimist'
 
-let count = 0
-let prompts = []
-let payloads = []
-let framesCount = 0
-const ws_url = 'ws://127.0.0.1:7860/queue/join'
+/** Usage */
+// Option 1: Add mask on full video with a prompt
+// node main.js
+// -v <video path>
+// -p <prompt>
+// -c <creativity scale 1-30>
+// -d <denoising strength 0-1>
+// -s <seed>
 
-const generateImageWithAPrompt = async (index) => {
-  const ws = new WebSocket(ws_url)
+// Example:
+// node main.js -p="hej there" -v='./video.mp4'
 
-  // Connection opened
-  ws.addEventListener('open', function (event) {
-    console.log('connected')
-  })
+// Option 2: Add prompts on a specific video frame
+// node main.js
+// -v <video path>
+// -f <frame number> (optional, default is last frame)
+// -i <prompt input file path>
+// node main.js -i='./prompts.txt' -v='./video.mp4' -f=50
 
-  // Listen for messages
-  ws.addEventListener('message', async function (event) {
-    let result = JSON.parse(event.data)
-    console.log(result)
-    const msg = result['msg']
-    switch (msg) {
-      case 'send_hash':
-        const reply = {
-          fn_index: 162,
-          session_hash: '8yzyqk2gv88',
-        }
-        sendMsg(JSON.stringify(reply))
-        break
-      case 'send_data':
-        console.log(
-          `Prompt ${count}: ${payloads[index].data[2]},
-		CFG Scale: ${payloads[index].data[21]},
-		Denoising strength: ${payloads[index].data[23]}
-		`
-        )
-        sendMsg(JSON.stringify(payloads[index]))
-        break
-      case 'process_completed':
-        console.log('Done')
-        count++
-        ws.removeAllListeners()
-        ws.close()
+const firstFrameIndex = 1
+const framesFolderPath = './frames'
+const frameNamePrefix = 'frame-'
+const frameNameSuffix = '.png'
+let CFG_Scale = 14 // creativity scale 1-30
+let denoising_Strength = 0.2 // denoising strength 0-1
+let seed = -1 // seed
+let videoPath = './video.mp4'
+let promptPath = './prompts.txt'
+let option = 0
+let prompt = ''
+let selectedFrame = -1
 
-        // In case we want to use previous image as a prompt for the next one
-        // const fileName = result['output']['data'][0][0]['name']
-        // const base64 = await imageToBase64(fileName)
-        // payloads[index+1].data[5] = base64
-        if (count < framesCount) {
-          generateImageWithAPrompt(count)
-        }
-        break
-    }
-  })
+const generatePayload = (payload, prompt, framePath) => {
+  try {
+    const _payload = structuredClone(payload)
 
-  const sendMsg = (msg) => {
-    ws.send(msg)
-  }
-}
+    // Modify prompt
+    _payload.data[2] = prompt
 
-function imageToBase64(file) {
-  return 'data:image/png;base64,' + fs.readFileSync(file, 'base64')
-}
-
-function getWidthAndHeightOfBase64(base64) {
-  const img = new Image()
-  img.src = base64
-  return [img.width, img.height]
-}
-
-const main = async () => {
-  const firstFrameIndex = 1
-  const framesFolderPath = './frames'
-  const frameNamePrefix = 'frame-'
-  const frameNameSuffix = '.png'
-
-  console.log('SnabbtAI script started')
-
-  console.log('Converting video to frames..')
-  await videoToFrames('./video/video.mp4')
-  console.log('Done')
-
-  framesCount = await countFilesInFolder(framesFolderPath)
-  prompts = generatePrompts(framesCount)
-  console.log(framesCount)
-  console.log('----------')
-  for (let i = 0; i < framesCount; i++) {
-    const _payload = deepClone(mockPayload)
-    //     _payload.data[2] = prompts[i]
-    _payload.data[2] = `Make a orange tiger cat amd make it look like a pastel painting`
-    const framePath = `${framesFolderPath}/${frameNamePrefix}${
-      i + firstFrameIndex
-    }${frameNameSuffix}`
     _payload.data[5] = imageToBase64(framePath)
-    console.log(framePath)
+
+    // Set width and height
     const [width, height] = getWidthAndHeightOfBase64(_payload.data[5])
     _payload.data[31] = height
     _payload.data[32] = width
-    _payload.data[21] = 14.0 // creativity scale 1-30
-    _payload.data[23] = 0.2 // denoising strength 0-1
-    _payload.data[24] = -1 // seed
-    // insert in to the start of array
-    payloads.push(_payload)
+
+    // Set creativity scale
+    _payload.data[21] = CFG_Scale
+    _payload.data[23] = denoising_Strength
+    _payload.data[24] = seed
+    return _payload
+  } catch (error) {
+    console.log(error)
   }
-
-  await generateImageWithAPrompt(0)
 }
 
-function deepClone(obj) {
-  return JSON.parse(JSON.stringify(obj))
+const addAIMaskOnVideo = async (prompt, framesCount) => {
+  try {
+    for (let i = 0; i < framesCount; i++) {
+      const framePath = `${framesFolderPath}/${frameNamePrefix}${
+        i + firstFrameIndex
+      }${frameNameSuffix}`
+      const _payload = generatePayload(mockPayload, prompt, framePath)
+      await generateAIImage(_payload)
+    }
+  } catch (error) {
+    console.error(error)
+  }
 }
 
-// run main in async mode
+const addPromptsOnVideoFrame = async (frameNumber, prompts) => {
+  try {
+    let framePath = `${framesFolderPath}/${frameNamePrefix}${frameNumber}${frameNameSuffix}`
+    console.log(framePath)
+    for (let i = 0; i < prompts.length; i++) {
+      const _payload = generatePayload(mockPayload, prompts[i], framePath)
+      framePath = await generateAIImage(_payload)
+    }
+  } catch (error) {
+    console.log(error)
+  }
+}
+
+const parseArgs = async () => {
+  const args = minimist(process.argv.slice(2))
+  if (args['c'] != undefined) {
+    CFG_Scale = parseFloat(args['c'])
+  }
+  if (args['d'] != undefined) {
+    denoising_Strength = parseFloat(args['d'])
+  }
+  if (args['s'] != undefined) {
+    seed = parseInt(args['s'])
+  }
+  if (args['p']) {
+    prompt = args['p']
+    option = 0
+  }
+  if (args['i']) {
+    option = 1
+    promptPath = args['i'].toString()
+  }
+  if (args['f'] != undefined) {
+    selectedFrame = parseInt(args['f'])
+  }
+  if (args['v']) {
+    videoPath = args['v'].toString()
+  }
+}
+
+const main = async () => {
+  try {
+    parseArgs()
+    await videoToFrames(videoPath)
+    const framesCount = await countFilesInFolder(framesFolderPath)
+
+    if (option == 0) {
+      await addAIMaskOnVideo(prompt, framesCount)
+    }
+
+    if (option == 1) {
+      const prompts = await parseCSV(promptPath)
+      if (selectedFrame < 0) {
+        selectedFrame = framesCount
+      }
+      await addPromptsOnVideoFrame(selectedFrame, prompts)
+    }
+  } catch (error) {
+    console.error(error)
+  }
+}
+
 main()

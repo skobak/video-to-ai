@@ -48,12 +48,10 @@ async function cleanFolder(folderPath) {
       await cleanFolder(filePath)
     } else {
       await fs.promises.unlink(filePath)
-      console.log(`Deleted file: ${filePath}`)
     }
   }
 
   await fs.promises.rmdir(folderPath)
-  console.log(`Deleted folder: ${folderPath}`)
 }
 
 export { videoToFrames, countFilesInFolder }
