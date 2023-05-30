@@ -1,16 +1,9 @@
 ## How to run
 
-1. Be sure you have node version >= 17
-
-```
-nvm install 17
-nvm use 17
-```
-
-2. Install and run the https://github.com/AUTOMATIC1111/stable-diffusion-webui
+1. Install and run the https://github.com/AUTOMATIC1111/stable-diffusion-webui
    on your local machine
 
-3. Run the script
+2. Run the script
 
 Default run:
 
