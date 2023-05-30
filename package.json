@@ -5,7 +5,7 @@
     "description": "",
     "main": "main.js",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "jest"
     },
     "author": "",
     "license": "ISC",
@@ -18,5 +18,16 @@
         "minimist": "^1.2.8",
         "websocket": "^1.0.34",
         "ws": "^8.13.0"
+    },
+    "devDependencies": {
+        "@babel/core": "^7.22.1",
+        "@babel/preset-env": "^7.22.4",
+        "babel-jest": "^29.5.0",
+        "jest": "^29.5.0"
+    },
+    "jest": {
+        "transform": {
+            "^.+\\.jsx?$": "babel-jest"
+        }
     }
 }
